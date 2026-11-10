@@ -1,0 +1,30 @@
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "huawei-wan-reconnect"
+version = "0.1.0"
+description = "Find the active internet connection on a Huawei DN8245V router and reconnect it (clears a stuck WE/TE Data quota redirect)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+# 3.10: oldest version CI tests; needed for match-free modern typing (X | None).
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["huawei", "router", "dn8245v", "te-data", "we-egypt", "pppoe"]
+
+[project.scripts]
+wan-reconnect = "huawei_wan_reconnect.cli:main"
+
+[project.urls]
+Repository = "https://github.com/back1ply/huawei-wan-reconnect"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.ruff]
+line-length = 100

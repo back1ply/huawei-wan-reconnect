@@ -1,0 +1,28 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - run: uv build
+      - name: fresh install from wheel
+        shell: bash
+        run: |
+          cd dist
+          # pwd -W gives a Windows path under Git Bash; plain pwd elsewhere
+          WHEEL="$(pwd -W 2>/dev/null || pwd)/$(ls *.whl)"
+          cd "$RUNNER_TEMP"
+          uvx --from "$WHEEL" wan-reconnect --help
+          uvx --from "$WHEEL" wan-reconnect --version
