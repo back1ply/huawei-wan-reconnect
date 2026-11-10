@@ -56,26 +56,63 @@ def confirm(name, args):
     return input(f"Reconnect {name}? Internet drops ~30s. [y/N] ").strip().lower() == "y"
 
 
+def _maybe_relogin(router, relogins_left):
+    """Log in again if budget remains; repeated failed logins can lock the account."""
+    if relogins_left <= 0:
+        return 0
+    try:
+        router.relogin()
+    except RouterError as e:
+        log(f"  relogin failed: {e}")
+    return relogins_left - 1
+
+
+def _enable_once(router, domain):
+    router.set_enable(domain, True)
+    return wait_for(router, domain, lambda c: c.status == "Connected" and c.ipv4, 90)
+
+
 def reenable(router, domain, attempts=5, max_relogins=2):
-    """Turn the WAN back on. Reuses the session and logs in again at most
-    max_relogins times, because repeated failed logins can lock the account."""
-    relogins = 0
+    """Turn the WAN back on, reusing the session and logging in again only when needed."""
+    relogins_left = max_relogins
     for attempt in range(1, attempts + 1):
         try:
-            router.set_enable(domain, True)
-            c = wait_for(router, domain, lambda c: c.status == "Connected" and c.ipv4, 90)
+            c = _enable_once(router, domain)
             if c:
                 return c
         except RouterError as e:
             log(f"  attempt {attempt}: {e}")
-            if relogins < max_relogins:
-                relogins += 1
-                try:
-                    router.relogin()
-                except RouterError as e2:
-                    log(f"  relogin failed: {e2}")
+            relogins_left = _maybe_relogin(router, relogins_left)
         time.sleep(5)
     return None
+
+
+def _wait_dropped(router, domain, off_seconds):
+    try:
+        dropped = wait_for(router, domain, lambda c: c.status != "Connected", 30)
+    except RouterError as e:
+        log(f"  {e}")
+        return False
+    if dropped:
+        time.sleep(off_seconds)
+    return bool(dropped)
+
+
+def cycle(router, target, off_seconds):
+    """Turn the connection off and back on. The re-enable always runs, even on Ctrl+C."""
+    log(f"disabling {target.name} ...")
+    router.set_enable(target.domain, False)
+    dropped = False
+    try:
+        dropped = _wait_dropped(router, target.domain, off_seconds)
+    finally:
+        log(f"enabling {target.name} ...")
+        after = reenable(router, target.domain)
+    if not after:
+        raise RouterError(f"{target.name} did not come back; re-enable it in the router's WAN page")
+    if not dropped:
+        raise RouterError("router did not drop the connection; it is still on")
+    return after
 
 
 def run(args):
@@ -87,26 +124,26 @@ def run(args):
     if not confirm(target.name, args):
         log("cancelled")
         return {"cancelled": True, "connection": before}, 1
-
-    log(f"disabling {target.name} ...")
-    router.set_enable(target.domain, False)
-    dropped = False
-    try:
-        dropped = wait_for(router, target.domain, lambda c: c.status != "Connected", 30)
-        if dropped:
-            time.sleep(args.off_seconds)
-    except RouterError as e:
-        log(f"  {e}")
-    finally:
-        # Always turn it back on, including after an error or Ctrl+C.
-        log(f"enabling {target.name} ...")
-        after = reenable(router, target.domain)
-
-    if not after:
-        raise RouterError(f"{target.name} did not come back; re-enable it in the router's WAN page")
-    if not dropped:
-        raise RouterError("router did not drop the connection; it is still on")
+    after = cycle(router, target, args.off_seconds)
     return {"before": before, "after": after.to_dict()}, 0
+
+
+def _describe(result):
+    if "after" in result:
+        b, a = result["before"], result["after"]
+        return f"reconnected {a['name']}: {b['ipv4']} -> {a['ipv4']}"
+    if result.get("dry_run"):
+        c = result["connection"]
+        return f"would reconnect {c['name']} ({c['kind']}, {c['ipv4']})"
+    return ""
+
+
+def _emit(doc, text, stream, as_json):
+    if as_json:
+        json.dump(doc, stream)
+        stream.write("\n")
+    elif text:
+        print(text, file=stream)
 
 
 def main(argv=None):
@@ -114,21 +151,9 @@ def main(argv=None):
     try:
         result, code = run(args)
     except (RouterError, SelectionError) as e:
-        if args.json:
-            json.dump({"error": str(e)}, sys.stderr)
-            sys.stderr.write("\n")
-        else:
-            print(f"error: {e}", file=sys.stderr)
+        _emit({"error": str(e)}, f"error: {e}", sys.stderr, args.json)
         return 1
-    if args.json:
-        json.dump(result, sys.stdout)
-        sys.stdout.write("\n")
-    elif "after" in result:
-        b, a = result["before"], result["after"]
-        print(f"reconnected {a['name']}: {b['ipv4']} -> {a['ipv4']}")
-    elif result.get("dry_run"):
-        c = result["connection"]
-        print(f"would reconnect {c['name']} ({c['kind']}, {c['ipv4']})")
+    _emit(result, _describe(result), sys.stdout, args.json)
     return code
 
 

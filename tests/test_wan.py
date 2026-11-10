@@ -25,7 +25,9 @@ def test_parse_reads_status_ip_and_uptime(one_active):
 def test_ip_record_does_not_mistake_dhcp_for_address():
     from conftest import DOM, ipwan
 
-    c = parse_connections(ipwan(DOM.format(5, "IP"), "x", "Connected", "IP_Routed", "203.0.113.7"))
+    c = parse_connections(
+        ipwan(DOM.format(5, "IP"), "x", status="Connected", mode="IP_Routed", ip="203.0.113.7")
+    )
     assert c[0].ipv4 == "203.0.113.7" and c[0].is_active
 
 

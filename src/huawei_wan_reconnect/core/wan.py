@@ -75,14 +75,18 @@ class SelectionError(Exception):
     pass
 
 
-def pick(conns, name=None):
-    """Return the one connection to reconnect, or raise SelectionError explaining why not."""
-    if name:
-        matches = [c for c in conns if c.name == name]
-        if not matches:
-            names = ", ".join(c.name for c in conns) or "none found"
-            raise SelectionError(f"no WAN connection named {name!r}; available: {names}")
-        return matches[0]
+def _names(conns):
+    return ", ".join(c.name for c in conns) or "none found"
+
+
+def _pick_by_name(conns, name):
+    for c in conns:
+        if c.name == name:
+            return c
+    raise SelectionError(f"no WAN connection named {name!r}; available: {_names(conns)}")
+
+
+def _pick_active(conns):
     active = [c for c in conns if c.is_active]
     if len(active) == 1:
         return active[0]
@@ -90,5 +94,9 @@ def pick(conns, name=None):
         raise SelectionError(
             "no connected internet WAN found; run 'wan-reconnect status' and pass --wan NAME"
         )
-    names = ", ".join(c.name for c in active)
-    raise SelectionError(f"several connected WANs ({names}); choose one with --wan NAME")
+    raise SelectionError(f"several connected WANs ({_names(active)}); choose one with --wan NAME")
+
+
+def pick(conns, name=None):
+    """Return the one connection to reconnect, or raise SelectionError explaining why not."""
+    return _pick_by_name(conns, name) if name else _pick_active(conns)
